@@ -46,8 +46,10 @@ class Server{
         this.round = 1;
         this.lockedValue = null;
         this.lockedround = -1;
-        this.recivedVote = [];
-        this.recivedCommit = [];
+        this.recivedVote = {};
+        this.recivedCommit = {};
+        this.voted = false;
+        this.commmited = false;
     }
 
     send (address, type, msg) {
@@ -66,15 +68,15 @@ class Server{
         }
     }
 
-    async proposal() {
+    async start() {
         if (this.proposaler == this.nodeID) {
             //为提议节点,广播区块
             if (!this.lockedValue && this.lockedround == -1) {
                 const newBlock = await block.generateNextBlock(geth);
-                const msg = new Message(newBlock, null, -1, 0, this.node).generateMessage();
+                const msg = new Message(this.node, newBlock, null, -1, 0).generateMessage();
                 this.broadcast('proposal', msg);
             } else {
-                const msg = new Message(null, this.lockedValue, this.lockedround, this.round, this.node).generateMessage();
+                const msg = new Message(this.node, null, this.lockedValue, this.lockedround, this.round).generateMessage();
                 this.broadcast('proposal', msg);
             }
         }else {
@@ -82,7 +84,10 @@ class Server{
         }
     }
 
-    async prevote(msg) {
+    async proposal(msg) {
+
+        if (this.voted) { return; }
+
         msg = JSON.parse(msg);
         let validProposal = true;
         // checkSignature
@@ -93,20 +98,32 @@ class Server{
         if (!validProposal) {
             const msg = new Message(this.node).generateNil();
             this.broadcast('prevote', msg);
+            this.recivedVote['nil'] = [this.nodeID] // record nil to recivedVoteinfo
+            this.voted = true;
             return;
         }
-
+        // send lockValue if locked
         if (this.lockedValue && this.lockedround != -1) {
-
+            const msg = new Message(this.node, null, this.lockedValue, this.lockedround, this.round).generateMessage();
+            this.broadcast('prevote', msg);
+        } else {
+        // else send propsal
+           const msg = new Message(this.node, msg.msg.block, null, -1, this.round);
+           this.broadcast('prevote', msg); 
         }
+        this.recivedVote[JSON.stringify(msg.msg)] = [this.nodeID] //record msg  to recivedVoteinfo
+        this.voted = true;
+    }
+
+    async prevote(msg) {
+
+        if (this.commmited) { return; }
+
+        msg = JSON.parse(msg);
 
     }
 
-    precommit() {
-
-    }
-
-    decision() {
+    async precommit() {
         this.node.writeBolck()
     }
 }
@@ -118,6 +135,9 @@ const newServer = (nodeID, pubKey, privateKey,nodeTable, app) => {
 };
 
 const setRouter = (app, server) => {
+    app.post('/proposal', async(req, res) => {
+        server.prevote(req.body);
+    })
     app.post('/prevote', async(req, res) => {
         server.prevote(req.body);
     })
