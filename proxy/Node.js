@@ -13,7 +13,7 @@ class Node{
 
     writeBolck (block) {
         this.block.append(block);
-        this.height = len(block);
+        this.height = block.length;
     }
 
     sign (msg) {
