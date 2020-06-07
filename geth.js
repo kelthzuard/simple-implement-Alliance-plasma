@@ -5,7 +5,7 @@ const Web3 = require("web3");
 const utils = require("./utils");
 const artifacts = require("./build/contracts/PlasmaChainManager.json");
 
-const provider = new Web3.providers.HttpProvider('http://localhost:8545');
+const provider = new Web3.providers.HttpProvider('http://localhost:7545');
 const web3 = new Web3(provider);
 
 var plasmaContract, plasmaOperator;
