@@ -4,7 +4,7 @@ const geth = require("../geth");
 const block = require("../block");
 
 class Message{
-    constructor(node, block=null, lockedValue=null, lockedround=null, round=null) {
+    constructor(node, block, lockedValue, lockedround, round) {
         this.block = block;
         this.lockedValue = lockedValue;
         this.lockedround = lockedround;
@@ -14,13 +14,13 @@ class Message{
     }
 
     generateMessage () {
-        const msg = {
+        const msg = JSON.stringify({
             block: this.block,
             lockedValue: this.lockedValue,
             lockedround: this.lockedround,
             round: this.round,
             height: this.node.height
-        }
+        });
         return {
             msg: msg,
             signedMsg: this.node.sign(msg),
@@ -29,8 +29,15 @@ class Message{
     }
 
     generateNil () {
+        const msg = JSON.stringify({
+            block: 'nil',
+            lockedValue: null,
+            lockedRound: -1,
+            round: this.round,
+            height: this.node.height
+        });
         return {
-            msg: 'nil',
+            msg: msg,
             signedMsg: this.node.sign(msg),
             nodeID: this.node.nodeID
         }
@@ -68,7 +75,7 @@ class Server{
         }
     }
 
-    async start() {
+    async start () {
         if (this.proposaler == this.nodeID) {
             //为提议节点,广播区块
             if (!this.lockedValue && this.lockedround == -1) {
@@ -84,21 +91,23 @@ class Server{
         }
     }
 
-    async proposal(msg) {
+    async proposal (msg) {
 
         if (this.voted) { return; }
 
         msg = JSON.parse(msg);
+        msg.msg = JSON.parse(msg.msg);
+
         let validProposal = true;
         // checkSignature
-        validSig = this.node.validSign(msg.msg, msg,signedMsg, this.node.nodeTable[msg.nodeID].pubKey);
+        const validSig = this.node.validSign(msg.msg, msg,signedMsg, this.node.nodeTable[msg.nodeID].pubKey);
         if (!validSig) { validProposal = false; }
         // check round and height
         if (msg.msg.round != this.round || msg.msg.height != this.node.height) { validProposal = false; }
         if (!validProposal) {
-            const msg = new Message(this.node).generateNil();
+            const msg = new Message(this.node, null, null, null, this.round).generateNil();
             this.broadcast('prevote', msg);
-            this.recivedVote['nil'] = [this.nodeID] // record nil to recivedVoteinfo
+            this.recivedVote[JSON.stringify(msg.msg)] = [this.nodeID] // record nil to recivedVoteinfo
             this.voted = true;
             return;
         }
@@ -115,16 +124,113 @@ class Server{
         this.voted = true;
     }
 
-    async prevote(msg) {
+    async prevote (msg) {
 
         if (this.commmited) { return; }
 
         msg = JSON.parse(msg);
-
+        msg.msg = JSON.parse(msg.msg);
+        
+        let validVote = true;
+        // checkSignature
+        const validSig = this.node.validSign(msg.msg, msg,signedMsg, this.node.nodeTable[msg.nodeID].pubKey);
+        if (!validSig) { validVote = false; }
+        // check round and height
+        if (msg.msg.round != this.round || msg.msg.height != this.node.height) { validVote = false; }
+        if (!validVote) { return; }
+        // record lockedRound vote which lockedround is higher or proposal
+        if (msg.msg.lockedround != -1 && msg.msg.lockedround < this.lockedround) { return; } // ignore lower lockedRound
+        const blockInfo = JSON.stringify(msg.msg);
+        if (!this.recivedVote.hasOwnProperty(blockInfo)) {
+            this.recivedVote[blockInfo] = [msg.nodeID];
+        } else {
+            let uni = true;
+            this.recivedVote[blockInfo].forEach( id => { if (id == msg.nodeID) { uni = false; } });
+            if (uni) {
+                this.recivedVote[blockInfo].push(msg.nodeID);
+            }
+        }
+        // check if there's more than 2/3 peers agree
+        const nodeAmout = Object.keys(this.node.nodeTable).length;
+        for (let key in this.recivedVote) {
+            let votes = this.recivedVote[key].length;
+            if (votes/nodeAmout > 0.6) {
+                // record recivedCommit
+                this.recivedCommit[key] = [this.node.nodeID];
+                // lock value and broadcast message
+                const msg = JSON.parse(key);
+                if (msg.block == 'nil') {
+                    const message = new Message(this.node, null, null, null, this.round).generateNil();
+                    this.broadcast('precommit', message);
+                }   
+                else if (msg.lockedround != -1) {
+                    this.lockedValue = msg.lockedValue;
+                    this.lockedround = msg.lockedround;
+                    const message = new Message(this.node, null, this.lockedValue, this.lockedround, this.round).generateMessage();
+                    this.broadcast('precommit', message);
+                } else {
+                    this.lockedValue = msg.block;
+                    this.lockedround = msg.round;
+                    const message = new Message(this.node, msg.block, null, -1, this.round).generateMessage();
+                    this.broadcast('precommit', message);
+                }
+                this.commmited = true;
+            }
+        }
     }
 
-    async precommit() {
-        this.node.writeBolck()
+    async precommit (msg) {
+        msg = JSON.parse(msg);
+        msg.msg = JSON.parse(msg.msg);
+        
+        let validCommit = true;
+        // checkSignature
+        const validSig = this.node.validSign(msg.msg, msg,signedMsg, this.node.nodeTable[msg.nodeID].pubKey);
+        if (!validSig) { validCommit = false; }
+        // check round and height
+        if (msg.msg.round != this.round || msg.msg.height != this.node.height) { validVote = false; }
+        if (!validCommit) { return; }
+        // record
+        const blockInfo = JSON.stringify(msg.msg);
+        if (!this.recivedCommit.hasOwnProperty(blockInfo)) {
+            this.recivedCommit[blockInfo] = [msg.nodeID];
+        } else {
+            let uni = true;
+            this.recivedCommit[blockInfo].forEach( id => { if (id == msg.nodeID) { uni = false; } });
+            if (uni) {
+                this.recivedCommit[blockInfo].push(msg.nodeID);
+            }
+        }
+        // check if there's more than 2/3 peers agree
+        const nodeAmout = Object.keys(this.node.nodeTable).length;
+        for (let key in this.recivedCommit) {
+            let votes = this.recivedCommit[key].length;
+            if (votes/nodeAmout > 0.6) {
+                // lock value and broadcast message
+                const msg = JSON.parse(key);
+                if (msg.block == 'nil') {
+                    this.decision('nil');
+                } else {
+                    this.decision(msg.block);
+                }
+            }
+        }
+    }
+
+    async decision (block) {
+        if (block == 'nil') {
+            this.round += 1;
+        } else {
+            this.node.writeBolck(block);
+            this.height = this.node.height;
+            this.round = 1
+            this.lockedValue = null;
+            this.lockedround = -1;
+            this.recivedVote = {};
+            this.recivedCommit = {};
+            this.voted = false;
+            this.commmited = false;
+        }
     }
 }
 Server.timeLimit = 1000; //1sec
@@ -142,6 +248,6 @@ const setRouter = (app, server) => {
         server.prevote(req.body);
     })
     app.post('/precommit', async(req, res) => {
-        server.precommit();
+        server.precommit(req.body);
     })
 }
