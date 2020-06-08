@@ -11,7 +11,7 @@
     "express": "~4.11.1",
     "ganache-cli": "^6.0.3",
     "keccak": "^1.4.0",
-    "minimist": "^1.2.0",
+    "minimist": "^1.2.5",
     "node-rsa": "^1.0.8",
     "rlp": "^2.0.0",
     "truffle": "^4.1.17",

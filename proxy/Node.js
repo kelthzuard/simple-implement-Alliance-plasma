@@ -25,7 +25,7 @@ class Node{
 
     validSign (msg, signedMsg, pubKey) {
         const key = new nodeRSA({ b: 2048 });
-        key.importKey(pubKey, "pkcs8-public-pem");
+        key.importKey(pubKey, "pkcs1-public-pem");
         const verify = key.verify(msg, signedMsg, "base64");
         return verify;
     }
