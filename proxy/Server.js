@@ -1,6 +1,6 @@
 const request = require('request');
 const Node = require('./Node');
-const geth = require("../geth");
+// const geth = require("../geth");
 const block = require("../block");
 
 class Message{
@@ -56,7 +56,7 @@ class Server{
         this.recivedCommit = {};
         this.voted = false;
         this.commmited = false;
-        this.faultTolerance = 0.5;
+        this.faultTolerance = 0.7;
     }
 
     send (address, type, msg) {
@@ -82,12 +82,15 @@ class Server{
         console.log(type+" has been broadcast");
     }
 
-    async start () {
+    async start (geth) {
+        if (this.voted || this.commmited) {
+            return;
+        }
         if (this.proposaler == this.nodeID) {
             //为提议节点,广播区块
             if (!this.lockedValue && this.lockedround == -1) {
-                //const newBlock = await block.generateNextBlock(geth);
-                const newBlock = "this is a new block";
+                const newBlock = await block.generateNextBlock(geth);
+                // const newBlock = "this is a new block";
                 const msg = new Message(this.node, newBlock, null, -1, 1).generateMessage();
                 this.broadcast('proposal', msg);
             } else {
