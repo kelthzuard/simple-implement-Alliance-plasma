@@ -9,7 +9,6 @@ class Message{
         this.lockedValue = lockedValue;
         this.lockedround = lockedround;
         this.round = round;
-        this.height = height;
         this.node = node;
     }
 
@@ -57,14 +56,21 @@ class Server{
         this.recivedCommit = {};
         this.voted = false;
         this.commmited = false;
+        this.faultTolerance = 0.5;
     }
 
     send (address, type, msg) {
-        request.post(address+'/'+type, {
-            form: {
+        request({
+            url: address+'/'+type,
+            method: "POST",
+            json: true,
+            headers: {
+                "content-type": "application/json",
+            },
+            body: {
                 data: JSON.stringify(msg)
             }
-        });
+        }); 
     }
 
     broadcast (type, msg) {
@@ -73,14 +79,16 @@ class Server{
                 this.send(this.node.nodeTable[id].address, type, msg);
             }
         }
+        console.log(type+" has been broadcast");
     }
 
     async start () {
         if (this.proposaler == this.nodeID) {
             //为提议节点,广播区块
             if (!this.lockedValue && this.lockedround == -1) {
-                const newBlock = await block.generateNextBlock(geth);
-                const msg = new Message(this.node, newBlock, null, -1, 0).generateMessage();
+                //const newBlock = await block.generateNextBlock(geth);
+                const newBlock = "this is a new block";
+                const msg = new Message(this.node, newBlock, null, -1, 1).generateMessage();
                 this.broadcast('proposal', msg);
             } else {
                 const msg = new Message(this.node, null, this.lockedValue, this.lockedround, this.round).generateMessage();
@@ -94,13 +102,12 @@ class Server{
     async proposal (msg) {
 
         if (this.voted) { return; }
-
         msg = JSON.parse(msg);
         msg.msg = JSON.parse(msg.msg);
 
         let validProposal = true;
         // checkSignature
-        const validSig = this.node.validSign(msg.msg, msg,signedMsg, this.node.nodeTable[msg.nodeID].pubKey);
+        const validSig = this.node.validSign(msg.msg, msg.signedMsg, this.node.nodeTable[msg.nodeID].pubKey);
         if (!validSig) { validProposal = false; }
         // check round and height
         if (msg.msg.round != this.round || msg.msg.height != this.node.height) { validProposal = false; }
@@ -113,12 +120,12 @@ class Server{
         }
         // send lockValue if locked
         if (this.lockedValue && this.lockedround != -1) {
-            const msg = new Message(this.node, null, this.lockedValue, this.lockedround, this.round).generateMessage();
-            this.broadcast('prevote', msg);
+            const message = new Message(this.node, null, this.lockedValue, this.lockedround, this.round).generateMessage();
+            this.broadcast('prevote', message);
         } else {
         // else send propsal
-           const msg = new Message(this.node, msg.msg.block, null, -1, this.round);
-           this.broadcast('prevote', msg); 
+           const message = new Message(this.node, msg.msg.block, null, -1, this.round).generateMessage();
+           this.broadcast('prevote', message); 
         }
         this.recivedVote[JSON.stringify(msg.msg)] = [this.nodeID] //record msg  to recivedVoteinfo
         this.voted = true;
@@ -133,7 +140,7 @@ class Server{
         
         let validVote = true;
         // checkSignature
-        const validSig = this.node.validSign(msg.msg, msg,signedMsg, this.node.nodeTable[msg.nodeID].pubKey);
+        const validSig = this.node.validSign(msg.msg, msg.signedMsg, this.node.nodeTable[msg.nodeID].pubKey);
         if (!validSig) { validVote = false; }
         // check round and height
         if (msg.msg.round != this.round || msg.msg.height != this.node.height) { validVote = false; }
@@ -154,7 +161,7 @@ class Server{
         const nodeAmout = Object.keys(this.node.nodeTable).length;
         for (let key in this.recivedVote) {
             let votes = this.recivedVote[key].length;
-            if (votes/nodeAmout > 0.6) {
+            if (votes/nodeAmout > this.faultTolerance) {
                 // record recivedCommit
                 this.recivedCommit[key] = [this.node.nodeID];
                 // lock value and broadcast message
@@ -185,10 +192,10 @@ class Server{
         
         let validCommit = true;
         // checkSignature
-        const validSig = this.node.validSign(msg.msg, msg,signedMsg, this.node.nodeTable[msg.nodeID].pubKey);
+        const validSig = this.node.validSign(msg.msg, msg.signedMsg, this.node.nodeTable[msg.nodeID].pubKey);
         if (!validSig) { validCommit = false; }
         // check round and height
-        if (msg.msg.round != this.round || msg.msg.height != this.node.height) { validVote = false; }
+        if (msg.msg.round != this.round || msg.msg.height != this.node.height) { validCommit = false; }
         if (!validCommit) { return; }
         // record
         const blockInfo = JSON.stringify(msg.msg);
@@ -205,7 +212,7 @@ class Server{
         const nodeAmout = Object.keys(this.node.nodeTable).length;
         for (let key in this.recivedCommit) {
             let votes = this.recivedCommit[key].length;
-            if (votes/nodeAmout > 0.6) {
+            if (votes/nodeAmout > this.faultTolerance) {
                 // lock value and broadcast message
                 const msg = JSON.parse(key);
                 if (msg.block == 'nil') {
@@ -236,18 +243,27 @@ class Server{
 Server.timeLimit = 1000; //1sec
 
 const newServer = (nodeID, pubKey, privateKey,nodeTable, app) => {
-    const server = new Server(nodeID, pubKey, privateKey,nodeTable);
+    const server = new Server(nodeID, pubKey, privateKey,nodeTable, "0");
     setRouter(app, server);
+    return server;
 };
 
 const setRouter = (app, server) => {
     app.post('/proposal', async(req, res) => {
-        server.prevote(req.body);
+        console.log("server"+server.node.nodeID+" recive proposal");
+        server.proposal(req.body.data);
+        res.sendStatus(200);
     })
     app.post('/prevote', async(req, res) => {
-        server.prevote(req.body);
+        console.log("server"+server.node.nodeID+" recive prevote");
+        server.prevote(req.body.data);
+        res.sendStatus(200);
     })
     app.post('/precommit', async(req, res) => {
-        server.precommit(req.body);
+        console.log("server"+server.node.nodeID+" recive precommit");
+        server.precommit(req.body.data);
+        res.sendStatus(200);
     })
 }
+
+module.exports = newServer;

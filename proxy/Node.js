@@ -12,21 +12,23 @@ class Node{
     }
 
     writeBolck (block) {
-        this.block.append(block);
-        this.height = block.length;
+        this.block.push(block);
+        this.height = this.block.length;
+        console.log("server"+this.nodeID+" successfule write block at height "+this.height);
     }
 
     sign (msg) {
-        const key = new nodeRSA({ b: 2048 });
+        const key = new nodeRSA({ b: 512 });
         key.importKey(this.privateKey, "pkcs1-private-pem");
-        const sign = key.sign(msg, "base64");
+        const sign = key.sign(Buffer.from(msg), 'BASE64').toString('BASE64');
         return sign;
     }
 
     validSign (msg, signedMsg, pubKey) {
-        const key = new nodeRSA({ b: 2048 });
+        msg = JSON.stringify(msg);
+        const key = new nodeRSA({ b: 512 });
         key.importKey(pubKey, "pkcs1-public-pem");
-        const verify = key.verify(msg, signedMsg, "base64");
+        var verify = key.verify(Buffer.from(msg), signedMsg, 'Buffer', 'BASE64'); 
         return verify;
     }
 }

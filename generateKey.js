@@ -1,8 +1,9 @@
 const NodeRSA = require('node-rsa');
 const fs = require('fs');
 const path = require('path');
+const argv = require('minimist')(process.argv.slice(2));
 
-const nodeNumber = 2;
+const nodeNumber = argv.n;
 var nodeTable = {};
 for (let i = 0; i < nodeNumber; i ++) {
   var key = new NodeRSA({ b: 512 });
