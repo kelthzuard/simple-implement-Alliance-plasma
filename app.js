@@ -26,5 +26,11 @@ app.post('/mineBlock', async(req, res) => {
     res.sendStatus(200); 
 })
 
+app.post('/deposit', async (req, res) => {
+    console.log(req.body)
+    await geth.deposit(req.body.address, req.body.amount);
+    res.send();
+});
+
 app.listen(http_port, () => console.log('Listening http on port: ' + http_port));   
 

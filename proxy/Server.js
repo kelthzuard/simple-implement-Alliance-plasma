@@ -54,12 +54,11 @@ class Server{
         this.lockedround = -1;
         this.recivedVote = {};
         this.recivedCommit = {};
-        this.voted = false;
-        this.commmited = false;
+        this.stage = (this.proposaler == this.nodeID)?"start":"proposal";
         this.faultTolerance = 0.7;
     }
 
-    send (address, type, msg) {
+    send (address, type, msg,) {
         request({
             url: address+'/'+type,
             method: "POST",
@@ -79,23 +78,23 @@ class Server{
                 this.send(this.node.nodeTable[id].address, type, msg);
             }
         }
-        console.log(type+" has been broadcast");
     }
 
     async start (geth) {
-        if (this.voted || this.commmited) {
+        if (this.stage != "start") {
             return;
         }
         if (this.proposaler == this.nodeID) {
             //为提议节点,广播区块
             if (!this.lockedValue && this.lockedround == -1) {
                 const newBlock = await block.generateNextBlock(geth);
-                // const newBlock = "this is a new block";
                 const msg = new Message(this.node, newBlock, null, -1, 1).generateMessage();
                 this.broadcast('proposal', msg);
+                this.stage = "proposal";
             } else {
                 const msg = new Message(this.node, null, this.lockedValue, this.lockedround, this.round).generateMessage();
                 this.broadcast('proposal', msg);
+                this.stage = "proposal";
             }
         }else {
             return;
@@ -104,7 +103,7 @@ class Server{
 
     async proposal (msg) {
 
-        if (this.voted) { return; }
+        if (this.stage != "proposal") { return; }
         msg = JSON.parse(msg);
         msg.msg = JSON.parse(msg.msg);
 
@@ -115,10 +114,11 @@ class Server{
         // check round and height
         if (msg.msg.round != this.round || msg.msg.height != this.node.height) { validProposal = false; }
         if (!validProposal) {
-            const msg = new Message(this.node, null, null, null, this.round).generateNil();
-            this.broadcast('prevote', msg);
+            console.log("propsal server"+this.node.nodeID+"at round"+this.round+" height"+this.height+" reject round"+msg.msg.round+" height"+msg.msg.height);
+            const message = new Message(this.node, null, null, null, this.round).generateNil();
+            this.broadcast('prevote', message);
             this.recivedVote[JSON.stringify(msg.msg)] = [this.nodeID] // record nil to recivedVoteinfo
-            this.voted = true;
+            this.stage = "prevote";
             return;
         }
         // send lockValue if locked
@@ -131,12 +131,12 @@ class Server{
            this.broadcast('prevote', message); 
         }
         this.recivedVote[JSON.stringify(msg.msg)] = [this.nodeID] //record msg  to recivedVoteinfo
-        this.voted = true;
+        this.stage = "prevote";
     }
 
     async prevote (msg) {
 
-        if (this.commmited) { return; }
+        if (this.stage != "prevote") { return; }
 
         msg = JSON.parse(msg);
         msg.msg = JSON.parse(msg.msg);
@@ -147,7 +147,10 @@ class Server{
         if (!validSig) { validVote = false; }
         // check round and height
         if (msg.msg.round != this.round || msg.msg.height != this.node.height) { validVote = false; }
-        if (!validVote) { return; }
+        if (!validVote) { 
+            console.log("prevote server"+this.node.nodeID+"at round"+this.round+" height"+this.height+" reject round"+msg.msg.round+" height"+msg.msg.height);
+            return; 
+        }
         // record lockedRound vote which lockedround is higher or proposal
         if (msg.msg.lockedround != -1 && msg.msg.lockedround < this.lockedround) { return; } // ignore lower lockedRound
         const blockInfo = JSON.stringify(msg.msg);
@@ -184,7 +187,7 @@ class Server{
                     const message = new Message(this.node, msg.block, null, -1, this.round).generateMessage();
                     this.broadcast('precommit', message);
                 }
-                this.commmited = true;
+                this.stage = "precommit";
             }
         }
     }
@@ -198,8 +201,11 @@ class Server{
         const validSig = this.node.validSign(msg.msg, msg.signedMsg, this.node.nodeTable[msg.nodeID].pubKey);
         if (!validSig) { validCommit = false; }
         // check round and height
-        if (msg.msg.round != this.round || msg.msg.height != this.node.height) { validCommit = false; }
-        if (!validCommit) { return; }
+        // if (msg.msg.round != this.round || msg.msg.height != this.node.height) { validCommit = false; }
+        if (!validCommit) { 
+            console.log(" precommit server"+this.node.nodeID+"at round"+this.round+" height"+this.height+" reject "+msg.nodeID+" at round"+msg.msg.round+" height"+msg.msg.height);
+            return; 
+        }
         // record
         const blockInfo = JSON.stringify(msg.msg);
         if (!this.recivedCommit.hasOwnProperty(blockInfo)) {
@@ -218,8 +224,16 @@ class Server{
             if (votes/nodeAmout > this.faultTolerance) {
                 // lock value and broadcast message
                 const msg = JSON.parse(key);
-                if (msg.block == 'nil') {
-                    this.decision('nil');
+                if (msg.height > this.node.height) {
+                    console.log("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+                    let self = this;
+                    this.requestBlock(this.node.nodeTable[this.recivedCommit[key][0]], this.height, msg.height, block => {
+                        block.forEach(e => { self.node.writeBolck(e); })
+                        self.decision(msg.block);
+                    });
+                } else if (msg.round > this.round) {
+                    this.round = msg.round;
+                    this.decision(msg.block);
                 } else {
                     this.decision(msg.block);
                 }
@@ -229,18 +243,46 @@ class Server{
 
     async decision (block) {
         if (block == 'nil') {
+            console.log('server'+this.node.nodeID+" write nil,go to next round");
             this.round += 1;
+
         } else {
             this.node.writeBolck(block);
             this.height = this.node.height;
             this.round = 1
             this.lockedValue = null;
             this.lockedround = -1;
-            this.recivedVote = {};
-            this.recivedCommit = {};
-            this.voted = false;
-            this.commmited = false;
         }
+        this.recivedVote = {};
+        this.recivedCommit = {};
+        this.stage = (this.proposaler == this.nodeID)?"start":"proposal";
+    }
+
+    async requestBlock(address, before, after, callback) {
+        request({
+            url: address+'/requestBlock',
+            method: "POST",
+            json: true,
+            headers: {
+                "content-type": "application/json",
+            },
+            body: {
+                data: JSON.stringify({
+                    before: before,
+                    after: after
+                })
+            }
+        }, function(err, res, body) {
+            callback(JSON.parse(body));
+        }); 
+    }
+
+    async returnBlock(before, after) {
+        let blockList = [];
+        for (let i = before; i <= after; i++) {
+            blockList.push(this.node.block[i]);
+        }
+        return JSON.stringify(blockList);
     }
 }
 Server.timeLimit = 1000; //1sec
@@ -256,17 +298,23 @@ const setRouter = (app, server) => {
         console.log("server"+server.node.nodeID+" recive proposal");
         server.proposal(req.body.data);
         res.sendStatus(200);
-    })
+    });
     app.post('/prevote', async(req, res) => {
         console.log("server"+server.node.nodeID+" recive prevote");
         server.prevote(req.body.data);
         res.sendStatus(200);
-    })
+    });
     app.post('/precommit', async(req, res) => {
         console.log("server"+server.node.nodeID+" recive precommit");
         server.precommit(req.body.data);
         res.sendStatus(200);
-    })
+    });
+    app.post('/requestBlock', async(req, res) => {
+        console.log("server"+server.node.nodeID+" recive requestBlock");
+        const data = JSON.parse(req.body.data)
+        const blockList = server.returnBlock(data.before, data.after);
+        res.send(blockList);
+    });
 }
 
 module.exports = newServer;
