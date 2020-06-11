@@ -247,6 +247,7 @@ class Server{
             this.round += 1;
 
         } else {
+            console.log(new Buffer(JSON.stringify(block)).length)
             this.node.writeBolck(block);
             this.height = this.node.height;
             this.round = 1
