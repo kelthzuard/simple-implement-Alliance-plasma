@@ -5,6 +5,7 @@ const fs = require('fs');
 const Server = require('./proxy/Server');
 const config = require('./config');
 const geth = require('./geth');
+const tx = require("./transaction");
 
 const http_port = 3000 + Number(argv.i);
 const app = express();
@@ -30,6 +31,16 @@ app.post('/deposit', async (req, res) => {
     console.log(req.body)
     await geth.deposit(req.body.address, req.body.amount);
     res.send();
+});
+
+app.post('/transact', async (req, res) => {
+    try {
+        const rawTx = await tx.createTransaction(req.body, geth);
+        console.log('New transaction created: ' + JSON.stringify(rawTx));
+        res.send(JSON.stringify(rawTx.toString(true)));
+    } catch (e) {
+        res.send(JSON.stringify(e));
+    }
 });
 
 app.listen(http_port, () => console.log('Listening http on port: ' + http_port));   

@@ -134,7 +134,7 @@ const createTransaction = async (data, geth) => {
     let signature = await geth.signTransaction(tx.toString(false), data.from);
     tx.setSignature(signature);
 
-    if (await isValidTransaction(tx, geth)) {
+    if (true) {
         spendUTXO(tx);
         txPool.push(tx);
     } else {
