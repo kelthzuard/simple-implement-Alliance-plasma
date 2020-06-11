@@ -30,7 +30,8 @@ const initHttpServer = (http_port) => {
     app.post('/transact', async (req, res) => {
         try {
             const rawTx = await tx.createTransaction(req.body, geth);
-            console.log('New transaction created: ' + JSON.stringify(rawTx));
+            console.log('New transaction created: ')
+            console.log(rawTx);
             res.send(JSON.stringify(rawTx.toString(true)));
         } catch (e) {
             res.send(JSON.stringify(e));
