@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"reflect"
 	"strings"
 	"time"
 	"unsafe"
@@ -36,9 +37,7 @@ type State struct {
 }
 
 func NewUser() *User {
-	rand.Seed(time.Now().UnixNano())
-	randnum := rand.Intn(100000)
-	address := string(IntToBytes(randnum))
+	address := GetRandomString(10)
 	wallet := 0
 	state := []State{}
 
@@ -50,6 +49,17 @@ func NewUser() *User {
 	}
 
 	return u
+}
+
+func GetRandomString(l int) string {
+	str := "0123456789abcdefghijklmnopqrstuvwxyz"
+	bytes := []byte(str)
+	result := []byte{}
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	for i := 0; i < l; i++ {
+		result = append(result, bytes[r.Intn(len(bytes))])
+	}
+	return string(result)
 }
 
 func IntToBytes(n int) []byte {
@@ -67,6 +77,7 @@ type FraudProof struct {
 	time                     string
 	t                        []Transaction
 	invalidTransactionsIndex int
+	FraudProofmaker          string
 }
 
 type Transaction struct {
@@ -78,7 +89,7 @@ type Transaction struct {
 }
 
 func NewTransaction(from *User, to *User, value int, signature int) (*Transaction, error) {
-	clock := time.Now().UnixNano()
+	clock := time.Now().Format("20060102150405")
 	reversevalue := 0 - value
 	to.ChangeUserState(value, from)
 	from.ChangeUserState(reversevalue, to)
@@ -117,7 +128,7 @@ func (u *User) ChangeUserState(value int, another *User) error {
 			value,
 			another.address,
 		}
-		fmt.Println(&prev)
+		// fmt.Println(&prev)
 	} else {
 		s = &State{
 			string(hash),
@@ -246,7 +257,8 @@ func fillDataTree(t []Transaction, dataTree *merkletree.Tree) ([]byte, error) {
 	return dataTree.Root(), nil
 }
 
-func (b *Block) CheckBlock(prev *Block, transactions []Transaction) (*FraudProof, error) {
+func checkBlock(b *Block, prev *Block, transactions []Transaction, u *User) (*FraudProof, error) {
+	fmt.Printf("用户 %s 开始检查区块\n", u.address)
 	rebuiltBlock, err := NewBlock(transactions, prev)
 	if err != nil {
 		return nil, err
@@ -256,22 +268,23 @@ func (b *Block) CheckBlock(prev *Block, transactions []Transaction) (*FraudProof
 	// tempDataRoot, err := fillDataTree(transactions, tempDataTree)
 
 	for i := 0; i < len(transactions); i++ {
-		fmt.Println(i)
+		// fmt.Println(i)
 		if len(b.transactions) <= i || b.transactions[i].from != transactions[i].from || b.transactions[i].to != transactions[i].to || b.transactions[i].value != transactions[i].value || b.transactions[i].signature != transactions[i].signature || b.transactions[i].time != transactions[i].time {
-			fmt.Println(i)
+			// fmt.Println(i)
 			t := rebuiltBlock.transactions[i]
 			var from string
 			var to string
 			var value int
 			var signature int
 			var time string
+			var FraudProofmaker string
 
 			from = t.from
 			to = t.to
 			value = t.value
 			signature = t.signature
 			time = t.time
-
+			FraudProofmaker = u.address
 			var invalidTransactionsIndex int
 
 			invalidTransactionsIndex = i
@@ -284,14 +297,15 @@ func (b *Block) CheckBlock(prev *Block, transactions []Transaction) (*FraudProof
 				time,
 				b.transactions,
 				invalidTransactionsIndex,
+				FraudProofmaker,
 			}, nil
 		}
 	}
 	return nil, nil
 }
 
-func (b *Block) VerifyFraudProof(fp FraudProof) bool {
-
+func verifyFraudProof(fp FraudProof) bool {
+	fmt.Printf("正在验证来自 %s ", fp.FraudProofmaker)
 	if fp.from != fp.t[fp.invalidTransactionsIndex].from || fp.to != fp.t[fp.invalidTransactionsIndex].to || fp.value != fp.t[fp.invalidTransactionsIndex].value || fp.time != fp.t[fp.invalidTransactionsIndex].time || fp.signature != fp.t[fp.invalidTransactionsIndex].signature {
 		return true
 	}
@@ -299,16 +313,43 @@ func (b *Block) VerifyFraudProof(fp FraudProof) bool {
 	return false
 }
 
+func SmartPrint(i interface{}) {
+	var kv = make(map[string]interface{})
+	vValue := reflect.ValueOf(i)
+	vType := reflect.TypeOf(i)
+	for i := 0; i < vValue.NumField(); i++ {
+		kv[vType.Field(i).Name] = vValue.Field(i)
+	}
+	fmt.Println("获取到数据:")
+	for k, v := range kv {
+		fmt.Print(k)
+		fmt.Print(":")
+		fmt.Print(v)
+		fmt.Println()
+	}
+}
+
 func main() {
+	fmt.Println("生成用户A")
 	userA := &User{
 		"foundation",
-		100,
+		100000,
 		[]State{},
 	}
+	time.Sleep(time.Second * 1)
+	fmt.Println("生成用户B")
 	userB := NewUser()
-
+	time.Sleep(time.Second * 1)
+	fmt.Println("生成用户C")
+	userC := NewUser()
+	time.Sleep(time.Second * 1)
+	fmt.Println("生成用户D")
+	userD := NewUser()
+	time.Sleep(time.Second * 1)
 	s := "foundation"
 
+	fmt.Println("生成创世区块")
+	time.Sleep(time.Second * 1)
 	foundationB := &Block{
 		nil,
 		nil,
@@ -319,61 +360,148 @@ func main() {
 		nil,
 	}
 
+	fmt.Println("创建交易")
+	time.Sleep(time.Second * 1)
 	tlist := []Transaction{}
-	t1, _ := NewTransaction(userA, userB, 1, tempSignature)
+	t1, _ := NewTransaction(userA, userB, 9, tempSignature)
 	tlist = append(tlist, *t1)
-	t2, _ := NewTransaction(userA, userB, 9, tempSignature)
+	t2, _ := NewTransaction(userB, userC, 1, tempSignature)
 	tlist = append(tlist, *t2)
 	t3, _ := NewTransaction(userB, userA, 3, tempSignature)
 	tlist = append(tlist, *t3)
 	t4, _ := NewTransaction(userA, userB, 5, tempSignature)
 	tlist = append(tlist, *t4)
+	t5, _ := NewTransaction(userA, userC, 1, tempSignature)
+	tlist = append(tlist, *t5)
+	t6, _ := NewTransaction(userC, userD, 1, tempSignature)
+	tlist = append(tlist, *t6)
+
+	ttemp := &Transaction{}
+	for i := 0; i < 32762; i++ {
+		ttemp, _ = NewTransaction(userA, userB, 1, tempSignature)
+		tlist = append(tlist, *ttemp)
+	}
+
+	fmt.Println("打包到区块")
+	time.Sleep(time.Second * 1)
 	b, _ := NewBlock(tlist, foundationB)
-	fp, err := b.CheckBlock(foundationB, tlist)
+
+	fps := []FraudProof{}
+
+	fp, err := checkBlock(b, foundationB, tlist, userA)
+	if fp != nil {
+		fps = append(fps, *fp)
+	}
+	fp, err = checkBlock(b, foundationB, tlist, userB)
+	if fp != nil {
+		fps = append(fps, *fp)
+	}
+	fp, err = checkBlock(b, foundationB, tlist, userC)
+	if fp != nil {
+		fps = append(fps, *fp)
+	}
+	fp, err = checkBlock(b, foundationB, tlist, userD)
+	if fp != nil {
+		fps = append(fps, *fp)
+	}
+
 	if err != nil {
 		fmt.Println(err)
 	}
 
 	fmt.Println("when transactions are correct")
-	if fp != nil {
-		result := b.VerifyFraudProof(*fp)
-		fmt.Println(result)
-	} else {
-		fmt.Println("--------------------")
-		fmt.Println("All transactions OK!")
-		fmt.Println("--------------------")
+	for i := 0; i < len(fps); i++ {
+		fmt.Printf("%v", fps[i])
+		if &fps[i] != nil {
+			fp := &fps[i]
+			result := verifyFraudProof(*fp)
+			fmt.Println("")
+			fmt.Println(result)
+			fmt.Println("验证成功，出错的是第 %d 笔交易", fp.invalidTransactionsIndex+1)
+			fmt.Println("其交易信息分别为")
+			fmt.Println(fp.from)
+			fmt.Println(fp.to)
+			fmt.Println(fp.value)
+			fmt.Println(fp.time)
+			fmt.Println(fp.signature)
+			fmt.Println("****************************************")
+			SmartPrint(fp.t[fp.invalidTransactionsIndex])
+			fmt.Printf("\n")
+			fmt.Printf("\n")
+		} else {
+			fmt.Println("All transactions OK!")
+		}
 	}
 
+	fps2 := []FraudProof{}
+
+	fmt.Println("篡改交易")
+	time.Sleep(time.Second * 1)
 	fmt.Print("\n")
 	fmt.Print("\n")
 	fmt.Println("when transactions are invalid")
 	faketlist := []Transaction{}
-	tfake, _ := NewTransaction(userA, userB, 2, tempSignature)
+	tfake, _ := NewTransaction(userC, userD, 1, tempSignature)
 	faketlist = append(faketlist, *t1)
 	faketlist = append(faketlist, *t2)
-	faketlist = append(faketlist, *tfake)
 	faketlist = append(faketlist, *t3)
+	faketlist = append(faketlist, *t4)
+	faketlist = append(faketlist, *t5)
+	faketlist = append(faketlist, *t6)
+	for i := 0; i < 32761; i++ {
+		ttemp, _ = NewTransaction(userA, userB, 1, tempSignature)
+		faketlist = append(faketlist, *ttemp)
+	}
+	faketlist = append(faketlist, *tfake)
 
-	fp, err = b.CheckBlock(foundationB, faketlist)
+	time1 := time.Now()
+	fp, err = checkBlock(b, foundationB, faketlist, userA)
+	if fp != nil {
+		fps2 = append(fps2, *fp)
+	}
+	time2 := time.Now()
+	fp, err = checkBlock(b, foundationB, faketlist, userB)
+	if fp != nil {
+		fps2 = append(fps2, *fp)
+	}
+	fp, err = checkBlock(b, foundationB, faketlist, userC)
+	if fp != nil {
+		fps2 = append(fps2, *fp)
+	}
+	fp, err = checkBlock(b, foundationB, faketlist, userD)
+	if fp != nil {
+		fps2 = append(fps2, *fp)
+	}
 	if err != nil {
 		fmt.Println(err)
 	}
 
-	if fp != nil {
-		result := b.VerifyFraudProof(*fp)
-		fmt.Println("")
-		fmt.Println(result)
-		fmt.Println("验证成功，出错的是第 %d 笔交易", fp.invalidTransactionsIndex+1)
-		fmt.Println("其交易信息分别为")
-		fmt.Println(fp.from)
-		fmt.Println(fp.to)
-		fmt.Println(fp.value)
-		fmt.Println(fp.time)
-		fmt.Println(fp.signature)
-		fmt.Println("****************************************")
-		fmt.Println("%v", fp.t[fp.invalidTransactionsIndex])
-	} else {
-		fmt.Println("All transactions OK!")
+	time3 := time.Now()
+	for i := 0; i < len(fps2); i++ {
+		// fmt.Printf("%v", fps[i])
+		fp := &fps2[i]
+		if fp != nil {
+			result := verifyFraudProof(*fp)
+			fmt.Println("")
+			fmt.Println(result)
+			fmt.Println("验证成功，出错的是第 %d 笔交易", fp.invalidTransactionsIndex+1)
+			fmt.Println("其交易信息分别为")
+			fmt.Println(fp.from)
+			fmt.Println(fp.to)
+			fmt.Println(fp.value)
+			fmt.Println(fp.time)
+			fmt.Println(fp.signature)
+			fmt.Println("****************************************")
+			SmartPrint(fp.t[fp.invalidTransactionsIndex])
+		} else {
+			fmt.Println("All transactions OK!")
+		}
 	}
-
+	time4 := time.Now()
+	fmt.Println("==========================================================")
+	fmt.Printf("欺诈证明生成时间 %v\n", time1.Sub(time2))
+	fmt.Println("==========================================================")
+	fmt.Println("==========================================================")
+	fmt.Printf("验证欺诈证明时间 %v\n", time3.Sub(time4))
+	fmt.Println("==========================================================")
 }
